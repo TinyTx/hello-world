@@ -157,72 +157,59 @@ class EnhancedDivingPhotosDownloader:
             return None
     
     def wait_for_login(self):
-        """等待用户手动登录"""
+        """等待用户手动登录 - 修复版"""
         self.log_message("请在浏览器中完成登录...")
-        self.log_message("登录完成后，请在控制台输入 'y' 并按回车继续")
+        self.log_message("=" * 50)
+        self.log_message("📋 登录步骤：")
+        self.log_message("1. 在打开的浏览器窗口中完成登录")
+        self.log_message("2. 确保能看到需要登录才能查看的内容")
+        self.log_message("3. 登录完成后回到此控制台")
+        self.log_message("=" * 50)
         
-        # 检测登录状态的常见元素
-        login_indicators = [
-            "//button[contains(text(), '登录')]",
-            "//button[contains(text(), '登录账号')]",
-            "//a[contains(text(), '登录')]",
-            "//input[@placeholder*='手机号' or @placeholder*='账号' or @placeholder*='用户名']",
-            "//input[@type='password']"
-        ]
+        max_attempts = 10
+        attempt = 0
         
-        logout_indicators = [
-            "//button[contains(text(), '退出')]",
-            "//a[contains(text(), '退出')]",
-            "//span[contains(text(), '个人中心')]",
-            "//div[contains(@class, 'avatar')]",
-            "//div[contains(@class, 'user')]"
-        ]
-        
-        while True:
+        while attempt < max_attempts:
             try:
-                # 检查是否还有登录按钮（表示未登录）
-                login_elements = []
-                for xpath in login_indicators:
-                    try:
-                        elements = self.driver.find_elements(By.XPATH, xpath)
-                        login_elements.extend(elements)
-                    except:
-                        pass
+                self.log_message(f"\n🔐 等待登录确认 (第 {attempt + 1}/{max_attempts} 次)")
+                self.log_message("请输入 'y' 确认已完成登录，输入 'n' 继续等待：")
                 
-                # 检查是否有登录后的元素（表示已登录）
-                logout_elements = []
-                for xpath in logout_indicators:
-                    try:
-                        elements = self.driver.find_elements(By.XPATH, xpath)
-                        logout_elements.extend(elements)
-                    except:
-                        pass
+                # 使用更简单的输入方式
+                import sys
+                sys.stdout.write(">>> ")
+                sys.stdout.flush()
                 
-                # 如果没有登录元素且有登录后的元素，可能已经登录
-                if not login_elements and logout_elements:
-                    self.log_message("检测到可能已登录")
-                    confirmation = input("是否已完成登录？(y/n): ").strip().lower()
-                    if confirmation == 'y':
-                        self.login_completed = True
-                        break
+                confirmation = input().strip().lower()
                 
-                # 让用户确认登录状态
-                confirmation = input("请确认是否已完成登录 (y/n): ").strip().lower()
-                if confirmation == 'y':
+                if confirmation == 'y' or confirmation == 'yes':
+                    self.log_message("✅ 用户确认登录完成")
                     self.login_completed = True
                     break
-                elif confirmation == 'n':
-                    self.log_message("请继续完成登录...")
-                    time.sleep(5)
+                elif confirmation == 'n' or confirmation == 'no':
+                    self.log_message("⏳ 继续等待登录，请完成登录后重试...")
+                    time.sleep(3)
+                    attempt += 1
+                elif confirmation == 'q' or confirmation == 'quit':
+                    self.log_message("❌ 用户取消登录")
+                    return False
                 else:
-                    self.log_message("请输入 'y' 或 'n'")
+                    self.log_message("⚠️  请输入 'y'(确认登录) 或 'n'(继续等待) 或 'q'(退出)")
                     
+            except KeyboardInterrupt:
+                self.log_message("\n❌ 用户中断程序")
+                return False
             except Exception as e:
-                self.log_message(f"检测登录状态时出错：{e}")
+                self.log_message(f"❌ 输入处理出错：{e}")
                 time.sleep(2)
+                attempt += 1
         
-        self.log_message("登录确认完成，开始分析页面...")
+        if not self.login_completed:
+            self.log_message("❌ 登录确认超时，程序退出")
+            return False
+        
+        self.log_message("🎉 登录确认完成，开始分析页面...")
         time.sleep(3)  # 等待页面稳定
+        return True
     
     def wait_for_page_load(self, timeout=10):
         """等待页面加载完成"""
@@ -235,8 +222,14 @@ class EnhancedDivingPhotosDownloader:
             self.log_message("页面加载超时，继续执行...")
     
     def scroll_and_load_all_content(self):
-        """滚动页面并加载所有动态内容 - 增强版"""
+        """滚动页面并加载所有动态内容 - 修复版（向上滚动）"""
         self.log_message("开始加载所有照片内容...")
+        self.log_message("🔄 注意：此网站是向上滚动加载内容")
+        
+        # 首先滚动到页面底部作为起点
+        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(3)
+        self.log_message("📍 已滚动到页面底部，开始向上滚动加载")
         
         last_height = 0
         last_img_count = 0
@@ -252,11 +245,12 @@ class EnhancedDivingPhotosDownloader:
             # 记录当前状态
             current_height = self.driver.execute_script("return document.body.scrollHeight")
             current_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
+            current_scroll_position = self.driver.execute_script("return window.pageYOffset")
             
-            self.log_message(f"滚动 {scroll_attempts + 1}/{max_attempts}, 页面高度: {current_height}, 图片数量: {current_img_count}")
+            self.log_message(f"滚动 {scroll_attempts + 1}/{max_attempts}, 页面高度: {current_height}, 图片数量: {current_img_count}, 滚动位置: {current_scroll_position}")
             
-            # 多种滚动策略
-            self.perform_comprehensive_scroll(scroll_attempts)
+            # 向上滚动策略
+            self.perform_upward_scroll(scroll_attempts)
             
             # 尝试点击加载更多按钮
             load_more_clicked = self.click_all_load_more_buttons()
@@ -270,6 +264,7 @@ class EnhancedDivingPhotosDownloader:
             # 检查是否有新内容
             new_height = self.driver.execute_script("return document.body.scrollHeight")
             new_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
+            new_scroll_position = self.driver.execute_script("return window.pageYOffset")
             
             # 多维度检测是否有新内容
             has_new_content = (
@@ -278,6 +273,16 @@ class EnhancedDivingPhotosDownloader:
                 self.has_pending_network_requests() or
                 load_more_clicked
             )
+            
+            # 检查是否已经滚动到顶部
+            if new_scroll_position <= 0:
+                self.log_message("🔝 已滚动到页面顶部")
+                # 到达顶部后，再次尝试触发加载
+                if self.force_trigger_all_loads():
+                    self.log_message("在页面顶部触发了额外加载")
+                    time.sleep(5)
+                else:
+                    no_new_content_count += 2  # 到达顶部时增加计数
             
             if not has_new_content and new_height == last_height and new_img_count == last_img_count:
                 no_new_content_count += 1
@@ -306,8 +311,8 @@ class EnhancedDivingPhotosDownloader:
                 # 执行垃圾回收，防止内存泄漏
                 self.driver.execute_script("window.gc && window.gc();")
         
-        # 最终处理
-        self.perform_final_content_check()
+        # 最终处理 - 确保完全加载
+        self.perform_final_upward_content_check()
         
         # 获取最终统计
         final_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
@@ -589,29 +594,125 @@ class EnhancedDivingPhotosDownloader:
             self.log_message(f"强制触发加载时出错: {e}")
             return False
     
-    def perform_final_content_check(self):
-        """执行最终的内容检查"""
+    def perform_upward_scroll(self, attempt):
+        """执行向上滚动策略"""
+        strategies = [
+            self.smooth_scroll_up,
+            self.step_scroll_up,
+            self.random_upward_scroll,
+            self.focus_scroll_up_areas
+        ]
+        
+        # 根据尝试次数选择不同的滚动策略
+        strategy_index = attempt % len(strategies)
+        strategies[strategy_index]()
+    
+    def smooth_scroll_up(self):
+        """平滑向上滚动"""
+        current_position = self.driver.execute_script("return window.pageYOffset")
+        if current_position > 0:
+            self.driver.execute_script("""
+                window.scrollTo({
+                    top: Math.max(0, window.pageYOffset - window.innerHeight),
+                    behavior: 'smooth'
+                });
+            """)
+        else:
+            # 如果已经在顶部，尝试滚动到底部再向上
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+            self.driver.execute_script("window.scrollTo({top: document.body.scrollHeight - window.innerHeight, behavior: 'smooth'});")
+        time.sleep(2)
+    
+    def step_scroll_up(self):
+        """分步向上滚动"""
+        viewport_height = self.driver.execute_script("return window.innerHeight")
+        current_scroll = self.driver.execute_script("return window.pageYOffset")
+        
+        # 向上滚动一个视窗高度
+        new_scroll = max(0, current_scroll - viewport_height)
+        self.driver.execute_script(f"window.scrollTo(0, {new_scroll});")
+        time.sleep(1.5)
+    
+    def random_upward_scroll(self):
+        """随机向上滚动模式"""
+        import random
+        
+        current_scroll = self.driver.execute_script("return window.pageYOffset")
+        
+        if current_scroll > 0:
+            # 随机向上滚动距离
+            scroll_distance = random.randint(300, 800)
+            new_scroll = max(0, current_scroll - scroll_distance)
+            
+            self.driver.execute_script(f"window.scrollTo(0, {new_scroll});")
+            time.sleep(random.uniform(1, 3))
+            
+            # 偶尔向下滚动一点，模拟用户行为
+            if random.random() < 0.3:
+                back_scroll = min(current_scroll, new_scroll + random.randint(100, 300))
+                self.driver.execute_script(f"window.scrollTo(0, {back_scroll});")
+                time.sleep(1)
+        else:
+            # 如果在顶部，滚动到底部重新开始
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+    
+    def focus_scroll_up_areas(self):
+        """聚焦向上滚动到特定区域"""
+        try:
+            # 查找可能包含图片的容器
+            containers = self.driver.find_elements(By.CSS_SELECTOR, 
+                "div[class*='photo'], div[class*='image'], div[class*='gallery'], "
+                "div[class*='grid'], div[class*='list'], div[class*='content']")
+            
+            if containers:
+                import random
+                container = random.choice(containers)
+                # 滚动到容器上方
+                self.driver.execute_script("""
+                    var rect = arguments[0].getBoundingClientRect();
+                    var scrollTop = window.pageYOffset + rect.top - window.innerHeight/2;
+                    window.scrollTo({top: Math.max(0, scrollTop), behavior: 'smooth'});
+                """, container)
+                time.sleep(2)
+        except:
+            # 如果失败，执行普通向上滚动
+            current_scroll = self.driver.execute_script("return window.pageYOffset")
+            new_scroll = max(0, current_scroll - 500)
+            self.driver.execute_script(f"window.scrollTo(0, {new_scroll});")
+            time.sleep(1.5)
+    
+    def perform_final_upward_content_check(self):
+        """执行最终的向上内容检查"""
         self.log_message("执行最终内容检查...")
         
-        # 滚动到顶部
-        self.driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(2)
-        
-        # 再次滚动到底部，确保所有内容都被触发
+        # 滚动到底部
         self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(3)
         
-        # 执行最后的加载检查
-        self.click_all_load_more_buttons()
-        time.sleep(5)
+        # 从底部向上滚动到顶部，确保所有内容都被触发
+        total_height = self.driver.execute_script("return document.body.scrollHeight")
+        viewport_height = self.driver.execute_script("return window.innerHeight")
         
-        # 滚动到中间位置，可能触发更多内容
-        middle_position = self.driver.execute_script("return document.body.scrollHeight / 2")
-        self.driver.execute_script(f"window.scrollTo(0, {middle_position});")
-        time.sleep(3)
+        steps = max(5, int(total_height / viewport_height))
+        for i in range(steps):
+            scroll_position = total_height - (i + 1) * (total_height / steps)
+            scroll_position = max(0, scroll_position)
+            
+            self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
+            time.sleep(2)
+            
+            # 尝试点击加载更多按钮
+            self.click_all_load_more_buttons()
+            time.sleep(1)
         
         # 最后回到顶部
         self.driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(3)
+        
+        # 再滚动到底部确认
+        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(2)
     
     def find_original_image_url(self, img_element):
@@ -1146,10 +1247,10 @@ class EnhancedDivingPhotosDownloader:
             time.sleep(5)
             
             # 等待用户登录
-            self.wait_for_login()
+            login_success = self.wait_for_login()
             
-            if not self.login_completed:
-                self.log_message("未完成登录，退出程序")
+            if not login_success or not self.login_completed:
+                self.log_message("❌ 登录失败或用户取消，程序退出")
                 return
             
             # 滚动并加载所有内容
