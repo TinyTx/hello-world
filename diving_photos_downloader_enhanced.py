@@ -78,7 +78,7 @@ class EnhancedDivingPhotosDownloader:
                 self.log_message(f"加载进度失败：{e}")
     
     def setup_driver(self):
-        """设置Chrome浏览器驱动"""
+        """设置Chrome浏览器驱动 - 增强版"""
         chrome_options = Options()
         
         # 基本设置
@@ -90,8 +90,50 @@ class EnhancedDivingPhotosDownloader:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
+        # 性能优化设置
+        chrome_options.add_argument('--disable-background-timer-throttling')
+        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+        chrome_options.add_argument('--disable-renderer-backgrounding')
+        chrome_options.add_argument('--disable-features=TranslateUI')
+        chrome_options.add_argument('--disable-ipc-flooding-protection')
+        
+        # 内存管理
+        chrome_options.add_argument('--max_old_space_size=4096')
+        chrome_options.add_argument('--memory-pressure-off')
+        
+        # 网络相关设置
+        chrome_options.add_argument('--aggressive-cache-discard')
+        chrome_options.add_argument('--disable-background-networking')
+        
+        # 启用性能日志
+        chrome_options.add_experimental_option('perfLoggingPrefs', {
+            'enableNetwork': True,
+            'enablePage': True,
+            'enableTimeline': True
+        })
+        chrome_options.add_experimental_option('loggingPrefs', {
+            'performance': 'ALL',
+            'browser': 'ALL'
+        })
+        
         # 设置用户代理
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        
+        # 图片加载策略
+        prefs = {
+            "profile.default_content_setting_values": {
+                "images": 1,  # 允许加载图片
+                "plugins": 1,
+                "popups": 0,
+                "geolocation": 0,
+                "notifications": 0,
+                "media_stream": 0,
+            },
+            "profile.managed_default_content_settings": {
+                "images": 1
+            }
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
         
         # 如果需要无头模式，取消下面的注释
         # chrome_options.add_argument('--headless')
@@ -99,7 +141,17 @@ class EnhancedDivingPhotosDownloader:
         try:
             driver = webdriver.Chrome(options=chrome_options)
             driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
+            # 设置页面加载超时
+            driver.set_page_load_timeout(60)
+            driver.implicitly_wait(10)
+            
+            # 最大化窗口
+            driver.maximize_window()
+            
+            self.log_message("Chrome浏览器启动成功")
             return driver
+            
         except Exception as e:
             self.log_message(f"错误：无法启动Chrome浏览器。{e}")
             return None
@@ -183,83 +235,384 @@ class EnhancedDivingPhotosDownloader:
             self.log_message("页面加载超时，继续执行...")
     
     def scroll_and_load_all_content(self):
-        """滚动页面并加载所有动态内容"""
+        """滚动页面并加载所有动态内容 - 增强版"""
         self.log_message("开始加载所有照片内容...")
         
         last_height = 0
+        last_img_count = 0
         scroll_attempts = 0
-        max_attempts = 200  # 增加最大尝试次数以处理1万多张照片
+        max_attempts = 300  # 增加最大尝试次数
         no_new_content_count = 0
+        stable_count_threshold = 8  # 增加稳定计数阈值
+        
+        # 启用网络监控
+        self.enable_network_monitoring()
         
         while scroll_attempts < max_attempts:
-            # 记录当前页面高度
+            # 记录当前状态
             current_height = self.driver.execute_script("return document.body.scrollHeight")
+            current_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
             
-            # 获取当前页面中的图片数量
-            try:
-                img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
-                self.log_message(f"滚动 {scroll_attempts + 1}/{max_attempts}, 当前图片数量: {img_count}")
-            except:
-                img_count = 0
+            self.log_message(f"滚动 {scroll_attempts + 1}/{max_attempts}, 页面高度: {current_height}, 图片数量: {current_img_count}")
             
-            # 滚动到页面底部
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            # 多种滚动策略
+            self.perform_comprehensive_scroll(scroll_attempts)
+            
+            # 尝试点击加载更多按钮
+            load_more_clicked = self.click_all_load_more_buttons()
+            if load_more_clicked:
+                self.log_message("发现并点击了加载更多按钮，等待内容加载...")
+                time.sleep(5)  # 给更多时间加载新内容
             
             # 等待内容加载
-            time.sleep(3)
+            self.wait_for_dynamic_content()
             
-            # 尝试点击"加载更多"或类似的按钮
-            load_more_buttons = [
-                "//button[contains(text(), '加载更多')]",
-                "//button[contains(text(), '更多')]",
-                "//div[contains(text(), '加载更多')]",
-                "//span[contains(text(), '加载更多')]",
-                "//a[contains(text(), '更多')]",
-                "//*[contains(@class, 'load-more')]",
-                "//*[contains(@class, 'more')]",
-                "//*[contains(@onclick, 'more')]"
-            ]
-            
-            for button_xpath in load_more_buttons:
-                try:
-                    buttons = self.driver.find_elements(By.XPATH, button_xpath)
-                    for button in buttons:
-                        if button.is_displayed() and button.is_enabled():
-                            try:
-                                self.driver.execute_script("arguments[0].click();", button)
-                                self.log_message("点击了加载更多按钮")
-                                time.sleep(3)
-                                break
-                            except:
-                                pass
-                except:
-                    pass
-            
-            # 检查是否有新内容加载
+            # 检查是否有新内容
             new_height = self.driver.execute_script("return document.body.scrollHeight")
+            new_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
             
-            if new_height == current_height and new_height == last_height:
+            # 多维度检测是否有新内容
+            has_new_content = (
+                new_height > current_height or 
+                new_img_count > current_img_count or
+                self.has_pending_network_requests() or
+                load_more_clicked
+            )
+            
+            if not has_new_content and new_height == last_height and new_img_count == last_img_count:
                 no_new_content_count += 1
-                if no_new_content_count >= 5:  # 连续5次没有新内容
-                    self.log_message("连续多次无新内容，可能已加载完成")
-                    break
+                self.log_message(f"无新内容计数: {no_new_content_count}/{stable_count_threshold}")
+                
+                if no_new_content_count >= stable_count_threshold:
+                    self.log_message("连续多次无新内容，尝试最后的加载策略...")
+                    # 最后的尝试：强制触发所有可能的加载事件
+                    if self.force_trigger_all_loads():
+                        self.log_message("强制触发加载成功，继续检测...")
+                        no_new_content_count = 0  # 重置计数
+                        time.sleep(5)
+                    else:
+                        self.log_message("已尝试所有加载策略，认为内容加载完成")
+                        break
             else:
                 no_new_content_count = 0
                 last_height = new_height
+                last_img_count = new_img_count
             
             scroll_attempts += 1
             
             # 每50次滚动保存一次进度
             if scroll_attempts % 50 == 0:
                 self.save_progress()
+                # 执行垃圾回收，防止内存泄漏
+                self.driver.execute_script("window.gc && window.gc();")
         
-        # 最后滚动到顶部
-        self.driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(3)
+        # 最终处理
+        self.perform_final_content_check()
         
-        # 获取最终的图片数量
+        # 获取最终统计
         final_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
         self.log_message(f"页面加载完成，共找到 {final_img_count} 个图片元素")
+        
+        # 禁用网络监控
+        self.disable_network_monitoring()
+    
+    def enable_network_monitoring(self):
+        """启用网络监控"""
+        try:
+            # 启用网络域
+            self.driver.execute_cdp_cmd('Network.enable', {})
+            self.pending_requests = set()
+            self.log_message("网络监控已启用")
+        except Exception as e:
+            self.log_message(f"无法启用网络监控: {e}")
+            self.pending_requests = None
+    
+    def disable_network_monitoring(self):
+        """禁用网络监控"""
+        try:
+            if hasattr(self, 'pending_requests'):
+                self.driver.execute_cdp_cmd('Network.disable', {})
+                self.log_message("网络监控已禁用")
+        except Exception as e:
+            self.log_message(f"禁用网络监控时出错: {e}")
+    
+    def has_pending_network_requests(self):
+        """检查是否有待处理的网络请求"""
+        if not hasattr(self, 'pending_requests') or self.pending_requests is None:
+            return False
+        
+        try:
+            # 获取网络活动
+            logs = self.driver.get_log('performance')
+            active_requests = 0
+            
+            for log in logs:
+                message = json.loads(log['message'])
+                if message.get('message', {}).get('method') == 'Network.requestWillBeSent':
+                    active_requests += 1
+                elif message.get('message', {}).get('method') in ['Network.responseReceived', 'Network.loadingFailed']:
+                    active_requests = max(0, active_requests - 1)
+            
+            return active_requests > 0
+        except:
+            return False
+    
+    def perform_comprehensive_scroll(self, attempt):
+        """执行综合滚动策略"""
+        strategies = [
+            self.smooth_scroll_to_bottom,
+            self.step_scroll_down,
+            self.random_scroll_pattern,
+            self.focus_scroll_areas
+        ]
+        
+        # 根据尝试次数选择不同的滚动策略
+        strategy_index = attempt % len(strategies)
+        strategies[strategy_index]()
+    
+    def smooth_scroll_to_bottom(self):
+        """平滑滚动到底部"""
+        self.driver.execute_script("""
+            window.scrollTo({
+                top: document.body.scrollHeight,
+                behavior: 'smooth'
+            });
+        """)
+        time.sleep(2)
+    
+    def step_scroll_down(self):
+        """分步滚动"""
+        viewport_height = self.driver.execute_script("return window.innerHeight")
+        current_scroll = self.driver.execute_script("return window.pageYOffset")
+        
+        # 滚动一个视窗高度
+        new_scroll = current_scroll + viewport_height
+        self.driver.execute_script(f"window.scrollTo(0, {new_scroll});")
+        time.sleep(1.5)
+    
+    def random_scroll_pattern(self):
+        """随机滚动模式，模拟用户行为"""
+        import random
+        
+        # 随机滚动距离
+        scroll_distance = random.randint(300, 800)
+        current_scroll = self.driver.execute_script("return window.pageYOffset")
+        new_scroll = current_scroll + scroll_distance
+        
+        self.driver.execute_script(f"window.scrollTo(0, {new_scroll});")
+        time.sleep(random.uniform(1, 3))
+        
+        # 偶尔向上滚动一点
+        if random.random() < 0.3:
+            back_scroll = new_scroll - random.randint(100, 300)
+            self.driver.execute_script(f"window.scrollTo(0, {back_scroll});")
+            time.sleep(1)
+    
+    def focus_scroll_areas(self):
+        """聚焦滚动到特定区域"""
+        try:
+            # 查找可能包含图片的容器
+            containers = self.driver.find_elements(By.CSS_SELECTOR, 
+                "div[class*='photo'], div[class*='image'], div[class*='gallery'], "
+                "div[class*='grid'], div[class*='list'], div[class*='content']")
+            
+            if containers:
+                import random
+                container = random.choice(containers)
+                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth'});", container)
+                time.sleep(2)
+        except:
+            # 如果失败，执行普通滚动
+            self.driver.execute_script("window.scrollBy(0, 500);")
+            time.sleep(1.5)
+    
+    def click_all_load_more_buttons(self):
+        """点击所有可能的加载更多按钮"""
+        clicked = False
+        
+        # 扩展的按钮选择器
+        load_more_selectors = [
+            "//button[contains(text(), '加载更多')]",
+            "//button[contains(text(), '更多')]",
+            "//button[contains(text(), '查看更多')]",
+            "//button[contains(text(), '展开更多')]",
+            "//div[contains(text(), '加载更多')]",
+            "//div[contains(text(), '更多')]",
+            "//span[contains(text(), '加载更多')]",
+            "//span[contains(text(), '更多')]",
+            "//a[contains(text(), '更多')]",
+            "//a[contains(text(), '加载更多')]",
+            "//*[contains(@class, 'load-more')]",
+            "//*[contains(@class, 'more')]",
+            "//*[contains(@class, 'btn-more')]",
+            "//*[contains(@class, 'show-more')]",
+            "//*[contains(@class, 'expand')]",
+            "//*[contains(@onclick, 'more')]",
+            "//*[contains(@onclick, 'load')]",
+            "//*[contains(@data-action, 'more')]",
+            "//*[contains(@data-action, 'load')]",
+            # 微赞平台特定的选择器
+            "//*[contains(@class, 'vzan-load')]",
+            "//*[contains(@class, 'vzan-more')]",
+            "//button[contains(@class, 'vzan')]",
+            "//div[contains(@class, 'load') and contains(@class, 'btn')]"
+        ]
+        
+        for selector in load_more_selectors:
+            try:
+                buttons = self.driver.find_elements(By.XPATH, selector)
+                for button in buttons:
+                    if button.is_displayed() and button.is_enabled():
+                        try:
+                            # 滚动到按钮位置
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                            time.sleep(0.5)
+                            
+                            # 尝试多种点击方式
+                            click_methods = [
+                                lambda: button.click(),
+                                lambda: self.driver.execute_script("arguments[0].click();", button),
+                                lambda: ActionChains(self.driver).move_to_element(button).click().perform()
+                            ]
+                            
+                            for click_method in click_methods:
+                                try:
+                                    click_method()
+                                    self.log_message(f"成功点击加载更多按钮: {selector}")
+                                    clicked = True
+                                    time.sleep(2)
+                                    break
+                                except:
+                                    continue
+                            
+                            if clicked:
+                                break
+                        except Exception as e:
+                            continue
+                if clicked:
+                    break
+            except:
+                continue
+        
+        return clicked
+    
+    def wait_for_dynamic_content(self):
+        """等待动态内容加载"""
+        # 等待基础时间
+        time.sleep(2)
+        
+        # 等待可能的AJAX请求完成
+        try:
+            WebDriverWait(self.driver, 10).until(
+                lambda driver: driver.execute_script("return jQuery.active == 0") if 
+                driver.execute_script("return typeof jQuery !== 'undefined'") else True
+            )
+        except:
+            pass
+        
+        # 等待图片加载
+        self.wait_for_images_to_load()
+    
+    def wait_for_images_to_load(self):
+        """等待图片加载完成"""
+        try:
+            # 等待所有图片加载完成
+            WebDriverWait(self.driver, 15).until(
+                lambda driver: driver.execute_script("""
+                    var images = document.querySelectorAll('img');
+                    for (var i = 0; i < images.length; i++) {
+                        if (!images[i].complete || images[i].naturalHeight === 0) {
+                            return false;
+                        }
+                    }
+                    return true;
+                """)
+            )
+        except TimeoutException:
+            self.log_message("等待图片加载超时，继续执行...")
+    
+    def force_trigger_all_loads(self):
+        """强制触发所有可能的加载事件"""
+        triggered = False
+        
+        try:
+            # 1. 触发滚动事件
+            self.driver.execute_script("""
+                window.dispatchEvent(new Event('scroll'));
+                window.dispatchEvent(new Event('resize'));
+            """)
+            
+            # 2. 触发懒加载
+            self.driver.execute_script("""
+                // 触发所有可能的懒加载图片
+                var lazyImages = document.querySelectorAll('img[data-src], img[data-lazy], img[loading="lazy"]');
+                lazyImages.forEach(function(img) {
+                    if (img.dataset.src) {
+                        img.src = img.dataset.src;
+                    }
+                    if (img.dataset.lazy) {
+                        img.src = img.dataset.lazy;
+                    }
+                });
+            """)
+            
+            # 3. 模拟鼠标移动和点击事件
+            body = self.driver.find_element(By.TAG_NAME, "body")
+            ActionChains(self.driver).move_to_element(body).perform()
+            
+            # 4. 尝试触发无限滚动
+            for _ in range(3):
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+                self.driver.execute_script("window.scrollBy(0, -100);")
+                time.sleep(1)
+                self.driver.execute_script("window.scrollBy(0, 200);")
+                time.sleep(2)
+            
+            # 5. 查找并点击所有可能的隐藏加载按钮
+            hidden_buttons = self.driver.find_elements(By.CSS_SELECTOR, 
+                "button[style*='display: none'], div[style*='display: none']")
+            
+            for button in hidden_buttons:
+                try:
+                    if 'load' in button.get_attribute('outerHTML').lower() or 'more' in button.get_attribute('outerHTML').lower():
+                        self.driver.execute_script("arguments[0].style.display = 'block';", button)
+                        self.driver.execute_script("arguments[0].click();", button)
+                        triggered = True
+                        time.sleep(2)
+                except:
+                    continue
+            
+            return triggered
+            
+        except Exception as e:
+            self.log_message(f"强制触发加载时出错: {e}")
+            return False
+    
+    def perform_final_content_check(self):
+        """执行最终的内容检查"""
+        self.log_message("执行最终内容检查...")
+        
+        # 滚动到顶部
+        self.driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(2)
+        
+        # 再次滚动到底部，确保所有内容都被触发
+        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(3)
+        
+        # 执行最后的加载检查
+        self.click_all_load_more_buttons()
+        time.sleep(5)
+        
+        # 滚动到中间位置，可能触发更多内容
+        middle_position = self.driver.execute_script("return document.body.scrollHeight / 2")
+        self.driver.execute_script(f"window.scrollTo(0, {middle_position});")
+        time.sleep(3)
+        
+        # 最后回到顶部
+        self.driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(2)
     
     def find_original_image_url(self, img_element):
         """查找原图URL"""
@@ -398,51 +751,257 @@ class EnhancedDivingPhotosDownloader:
         return best_url
     
     def extract_all_photo_urls(self):
-        """提取所有照片URL"""
+        """提取所有照片URL - 增强版"""
         self.log_message("开始提取照片链接...")
         
         photo_urls = []
         processed_elements = set()
         
-        # 获取所有图片元素
+        # 方法1：从img元素提取
+        img_urls = self.extract_urls_from_img_elements()
+        photo_urls.extend(img_urls)
+        
+        # 方法2：从页面源代码提取
+        source_urls = self.extract_urls_from_page_source()
+        photo_urls.extend(source_urls)
+        
+        # 方法3：从背景图片样式提取
+        bg_urls = self.extract_urls_from_background_images()
+        photo_urls.extend(bg_urls)
+        
+        # 方法4：从JavaScript变量提取
+        js_urls = self.extract_urls_from_javascript()
+        photo_urls.extend(js_urls)
+        
+        # 方法5：从data属性和自定义属性提取
+        data_urls = self.extract_urls_from_data_attributes()
+        photo_urls.extend(data_urls)
+        
+        # 去重并过滤
+        unique_urls = list(set(photo_urls))
+        valid_urls = []
+        
+        for url in unique_urls:
+            if self.is_valid_image_url(url) and self.is_competition_photo(url):
+                enhanced_url = self.enhance_image_url_quality(url)
+                valid_urls.append(enhanced_url)
+        
+        self.log_message(f"去重后共找到 {len(valid_urls)} 个有效照片链接")
+        return valid_urls
+    
+    def extract_urls_from_img_elements(self):
+        """从img元素提取URL"""
+        urls = []
         img_elements = self.driver.find_elements(By.TAG_NAME, "img")
         self.log_message(f"找到 {len(img_elements)} 个图片元素")
         
         for i, img_element in enumerate(img_elements, 1):
             try:
-                # 避免重复处理同一个元素
-                element_id = img_element.get_attribute('outerHTML')[:100]
-                if element_id in processed_elements:
-                    continue
-                processed_elements.add(element_id)
-                
-                if i % 100 == 0:
+                if i % 500 == 0:
                     self.log_message(f"正在处理第 {i}/{len(img_elements)} 个图片元素")
                 
-                # 获取原图URL
-                original_urls = self.find_original_image_url(img_element)
+                # 检查各种可能的URL属性
+                url_attrs = [
+                    'src', 'data-src', 'data-original', 'data-large', 'data-big',
+                    'data-full', 'data-origin', 'data-raw', 'data-url', 'data-lazy',
+                    'data-srcset', 'srcset', 'data-image', 'data-photo'
+                ]
                 
-                # 如果没找到原图，使用当前src
-                if not original_urls:
-                    src = img_element.get_attribute('src')
-                    if src and self.is_valid_image_url(src):
-                        original_urls = [src]
+                for attr in url_attrs:
+                    url = img_element.get_attribute(attr)
+                    if url:
+                        # 处理srcset格式
+                        if 'srcset' in attr and ',' in url:
+                            srcset_urls = self.parse_srcset(url)
+                            urls.extend(srcset_urls)
+                        else:
+                            urls.append(url)
                 
-                # 处理找到的URL
-                for url in original_urls:
-                    if self.is_competition_photo(url):
-                        enhanced_url = self.enhance_image_url_quality(url)
-                        photo_urls.append(enhanced_url)
+                # 检查父元素的链接
+                try:
+                    parent = img_element.find_element(By.XPATH, "./..")
+                    if parent.tag_name.lower() == 'a':
+                        href = parent.get_attribute('href')
+                        if href:
+                            urls.append(href)
+                except:
+                    pass
                 
             except Exception as e:
-                self.log_message(f"处理第 {i} 个图片元素时出错：{e}")
                 continue
         
-        # 去重
-        unique_urls = list(set(photo_urls))
-        self.log_message(f"去重后共找到 {len(unique_urls)} 个有效照片链接")
+        self.log_message(f"从img元素提取到 {len(urls)} 个URL")
+        return urls
+    
+    def extract_urls_from_page_source(self):
+        """从页面源代码提取URL"""
+        urls = []
+        page_source = self.driver.page_source
         
-        return unique_urls
+        # 多种URL匹配模式
+        url_patterns = [
+            # 微赞平台特定模式
+            r'"(https?://[^"]*i\d*cut\.vzan\.com[^"]*\.(?:jpg|jpeg|png|webp|gif)(?:\?[^"]*)?)"',
+            r"'(https?://[^']*i\d*cut\.vzan\.com[^']*\.(?:jpg|jpeg|png|webp|gif)(?:\?[^']*)?)'",
+            # 通用图片URL模式
+            r'"(https?://[^"]*\.(?:jpg|jpeg|png|webp|gif)(?:\?[^"]*)?)"',
+            r"'(https?://[^']*\.(?:jpg|jpeg|png|webp|gif)(?:\?[^']*)?)'",
+            # JavaScript中的图片URL
+            r'src:\s*["\']([^"\']*\.(?:jpg|jpeg|png|webp|gif)(?:\?[^"\']*)?)["\']',
+            r'image:\s*["\']([^"\']*\.(?:jpg|jpeg|png|webp|gif)(?:\?[^"\']*)?)["\']',
+            r'photo:\s*["\']([^"\']*\.(?:jpg|jpeg|png|webp|gif)(?:\?[^"\']*)?)["\']',
+            # data-* 属性中的URL
+            r'data-[^=]*=["\']([^"\']*\.(?:jpg|jpeg|png|webp|gif)(?:\?[^"\']*)?)["\']',
+        ]
+        
+        for pattern in url_patterns:
+            matches = re.findall(pattern, page_source, re.IGNORECASE)
+            urls.extend(matches)
+        
+        self.log_message(f"从页面源代码提取到 {len(urls)} 个URL")
+        return urls
+    
+    def extract_urls_from_background_images(self):
+        """从背景图片样式提取URL"""
+        urls = []
+        
+        try:
+            # 查找所有有背景图片的元素
+            elements_with_bg = self.driver.find_elements(By.CSS_SELECTOR, "[style*='background-image']")
+            
+            for element in elements_with_bg:
+                style = element.get_attribute('style')
+                if style:
+                    # 提取background-image中的URL
+                    matches = re.findall(r'background-image:\s*url\(["\']?(.*?)["\']?\)', style, re.IGNORECASE)
+                    for match in matches:
+                        if match.startswith('http') or match.startswith('//'):
+                            urls.append(match if match.startswith('http') else 'https:' + match)
+                        else:
+                            urls.append(urljoin(self.base_url, match))
+            
+            # 查找CSS样式表中的背景图片
+            css_elements = self.driver.find_elements(By.TAG_NAME, "style")
+            for css_element in css_elements:
+                css_content = css_element.get_attribute('innerHTML')
+                if css_content:
+                    matches = re.findall(r'background-image:\s*url\(["\']?(.*?)["\']?\)', css_content, re.IGNORECASE)
+                    for match in matches:
+                        if self.is_valid_image_url(match):
+                            if match.startswith('http') or match.startswith('//'):
+                                urls.append(match if match.startswith('http') else 'https:' + match)
+                            else:
+                                urls.append(urljoin(self.base_url, match))
+        
+        except Exception as e:
+            self.log_message(f"提取背景图片URL时出错: {e}")
+        
+        self.log_message(f"从背景图片提取到 {len(urls)} 个URL")
+        return urls
+    
+    def extract_urls_from_javascript(self):
+        """从JavaScript变量和对象中提取URL"""
+        urls = []
+        
+        try:
+            # 执行JavaScript来查找图片URL
+            js_code = """
+            var urls = [];
+            
+            // 查找全局变量中的图片URL
+            for (var prop in window) {
+                try {
+                    var value = window[prop];
+                    if (typeof value === 'string' && value.match(/\\.(jpg|jpeg|png|webp|gif)/i)) {
+                        urls.push(value);
+                    } else if (typeof value === 'object' && value !== null) {
+                        // 递归查找对象中的图片URL
+                        function findUrls(obj, depth) {
+                            if (depth > 3) return; // 限制递归深度
+                            for (var key in obj) {
+                                try {
+                                    var val = obj[key];
+                                    if (typeof val === 'string' && val.match(/\\.(jpg|jpeg|png|webp|gif)/i)) {
+                                        urls.push(val);
+                                    } else if (typeof val === 'object' && val !== null) {
+                                        findUrls(val, depth + 1);
+                                    }
+                                } catch(e) {}
+                            }
+                        }
+                        findUrls(value, 0);
+                    }
+                } catch(e) {}
+            }
+            
+            // 查找所有script标签中的图片URL
+            var scripts = document.querySelectorAll('script');
+            for (var i = 0; i < scripts.length; i++) {
+                var scriptContent = scripts[i].innerHTML;
+                var matches = scriptContent.match(/(https?:\\/\\/[^\\s"']*\\.(jpg|jpeg|png|webp|gif)[^\\s"']*)/gi);
+                if (matches) {
+                    urls = urls.concat(matches);
+                }
+            }
+            
+            return urls;
+            """
+            
+            js_urls = self.driver.execute_script(js_code)
+            if js_urls:
+                urls.extend(js_urls)
+        
+        except Exception as e:
+            self.log_message(f"从JavaScript提取URL时出错: {e}")
+        
+        self.log_message(f"从JavaScript提取到 {len(urls)} 个URL")
+        return urls
+    
+    def extract_urls_from_data_attributes(self):
+        """从data属性和自定义属性提取URL"""
+        urls = []
+        
+        try:
+            # 查找所有有data-*属性的元素
+            elements = self.driver.find_elements(By.CSS_SELECTOR, "[data-src], [data-original], [data-image], [data-photo], [data-url]")
+            
+            for element in elements:
+                # 获取所有属性
+                attributes = self.driver.execute_script("""
+                    var items = {};
+                    for (index = 0; index < arguments[0].attributes.length; ++index) {
+                        items[arguments[0].attributes[index].name] = arguments[0].attributes[index].value;
+                    }
+                    return items;
+                """, element)
+                
+                for attr_name, attr_value in attributes.items():
+                    if attr_value and ('data-' in attr_name or 'src' in attr_name.lower()):
+                        if self.is_valid_image_url(attr_value):
+                            urls.append(attr_value)
+        
+        except Exception as e:
+            self.log_message(f"从data属性提取URL时出错: {e}")
+        
+        self.log_message(f"从data属性提取到 {len(urls)} 个URL")
+        return urls
+    
+    def parse_srcset(self, srcset_value):
+        """解析srcset属性值"""
+        urls = []
+        if not srcset_value:
+            return urls
+        
+        # srcset格式: "url1 1x, url2 2x" 或 "url1 100w, url2 200w"
+        entries = srcset_value.split(',')
+        for entry in entries:
+            entry = entry.strip()
+            # 提取URL部分（去除尺寸描述符）
+            url = entry.split()[0] if entry else ''
+            if url and self.is_valid_image_url(url):
+                urls.append(url)
+        
+        return urls
     
     def is_valid_image_url(self, url):
         """检查是否为有效的图片URL"""

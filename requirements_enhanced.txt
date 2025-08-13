@@ -1,0 +1,40 @@
+# 增强版跳水锦标赛照片下载器依赖包
+# Enhanced Diving Photos Downloader Requirements
+
+# 核心依赖
+selenium>=4.15.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# WebDriver管理
+webdriver-manager>=4.0.0
+
+# 数据处理
+urllib3>=2.0.0
+certifi>=2023.0.0
+
+# 图片处理（可选，用于图片验证和优化）
+Pillow>=10.0.0
+
+# 进度条显示（可选）
+tqdm>=4.66.0
+
+# 更好的JSON处理
+orjson>=3.9.0
+
+# 网络请求重试
+requests-toolbelt>=1.0.0
+urllib3-retry>=1.0.0
+
+# 日志增强
+colorlog>=6.7.0
+
+# 配置文件处理
+pyyaml>=6.0
+
+# 时间处理
+python-dateutil>=2.8.0
+
+# 系统信息
+psutil>=5.9.0
