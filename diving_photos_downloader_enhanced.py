@@ -78,7 +78,7 @@ class EnhancedDivingPhotosDownloader:
                 self.log_message(f"加载进度失败：{e}")
     
     def setup_driver(self):
-        """设置Chrome浏览器驱动 - 增强版"""
+        """设置Chrome浏览器驱动 - 兼容性修复版"""
         chrome_options = Options()
         
         # 基本设置
@@ -104,17 +104,6 @@ class EnhancedDivingPhotosDownloader:
         # 网络相关设置
         chrome_options.add_argument('--aggressive-cache-discard')
         chrome_options.add_argument('--disable-background-networking')
-        
-        # 启用性能日志
-        chrome_options.add_experimental_option('perfLoggingPrefs', {
-            'enableNetwork': True,
-            'enablePage': True,
-            'enableTimeline': True
-        })
-        chrome_options.add_experimental_option('loggingPrefs', {
-            'performance': 'ALL',
-            'browser': 'ALL'
-        })
         
         # 设置用户代理
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
@@ -154,7 +143,24 @@ class EnhancedDivingPhotosDownloader:
             
         except Exception as e:
             self.log_message(f"错误：无法启动Chrome浏览器。{e}")
-            return None
+            self.log_message("尝试使用简化配置重新启动...")
+            
+            # 尝试使用最简配置
+            try:
+                simple_options = Options()
+                simple_options.add_argument('--no-sandbox')
+                simple_options.add_argument('--disable-dev-shm-usage')
+                simple_options.add_argument('--disable-gpu')
+                simple_options.add_argument('--window-size=1920,1080')
+                
+                driver = webdriver.Chrome(options=simple_options)
+                driver.maximize_window()
+                self.log_message("使用简化配置启动Chrome浏览器成功")
+                return driver
+                
+            except Exception as e2:
+                self.log_message(f"简化配置也失败：{e2}")
+                return None
     
     def wait_for_login(self):
         """等待用户手动登录 - 修复版"""
@@ -222,14 +228,17 @@ class EnhancedDivingPhotosDownloader:
             self.log_message("页面加载超时，继续执行...")
     
     def scroll_and_load_all_content(self):
-        """滚动页面并加载所有动态内容 - 修复版（向上滚动）"""
+        """滚动页面并加载所有动态内容 - 图片区域滚动版"""
         self.log_message("开始加载所有照片内容...")
-        self.log_message("🔄 注意：此网站是向上滚动加载内容")
+        self.log_message("🔄 注意：此网站需要滚动图片区域才能加载更多图片")
         
-        # 首先滚动到页面底部作为起点
-        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(3)
-        self.log_message("📍 已滚动到页面底部，开始向上滚动加载")
+        # 首先找到图片容器区域
+        photo_container = self.find_photo_container()
+        if not photo_container:
+            self.log_message("❌ 未找到图片容器，尝试滚动整个页面")
+            return self.scroll_and_load_all_content_fallback()
+        
+        self.log_message("✅ 找到图片容器，开始滚动加载")
         
         last_height = 0
         last_img_count = 0
@@ -243,14 +252,14 @@ class EnhancedDivingPhotosDownloader:
         
         while scroll_attempts < max_attempts:
             # 记录当前状态
-            current_height = self.driver.execute_script("return document.body.scrollHeight")
+            current_height = self.get_container_scroll_height(photo_container)
             current_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
-            current_scroll_position = self.driver.execute_script("return window.pageYOffset")
+            current_scroll_position = self.get_container_scroll_position(photo_container)
             
-            self.log_message(f"滚动 {scroll_attempts + 1}/{max_attempts}, 页面高度: {current_height}, 图片数量: {current_img_count}, 滚动位置: {current_scroll_position}")
+            self.log_message(f"滚动 {scroll_attempts + 1}/{max_attempts}, 容器高度: {current_height}, 图片数量: {current_img_count}, 滚动位置: {current_scroll_position}")
             
-            # 向上滚动策略
-            self.perform_upward_scroll(scroll_attempts)
+            # 滚动图片容器区域
+            self.scroll_photo_container(photo_container, scroll_attempts)
             
             # 尝试点击加载更多按钮
             load_more_clicked = self.click_all_load_more_buttons()
@@ -262,9 +271,9 @@ class EnhancedDivingPhotosDownloader:
             self.wait_for_dynamic_content()
             
             # 检查是否有新内容
-            new_height = self.driver.execute_script("return document.body.scrollHeight")
+            new_height = self.get_container_scroll_height(photo_container)
             new_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
-            new_scroll_position = self.driver.execute_script("return window.pageYOffset")
+            new_scroll_position = self.get_container_scroll_position(photo_container)
             
             # 多维度检测是否有新内容
             has_new_content = (
@@ -274,15 +283,15 @@ class EnhancedDivingPhotosDownloader:
                 load_more_clicked
             )
             
-            # 检查是否已经滚动到顶部
-            if new_scroll_position <= 0:
-                self.log_message("🔝 已滚动到页面顶部")
-                # 到达顶部后，再次尝试触发加载
+            # 检查是否已经滚动到容器底部
+            if self.is_container_at_bottom(photo_container):
+                self.log_message("🔝 已滚动到图片容器底部")
+                # 到达底部后，再次尝试触发加载
                 if self.force_trigger_all_loads():
-                    self.log_message("在页面顶部触发了额外加载")
+                    self.log_message("在容器底部触发了额外加载")
                     time.sleep(5)
                 else:
-                    no_new_content_count += 2  # 到达顶部时增加计数
+                    no_new_content_count += 2  # 到达底部时增加计数
             
             if not has_new_content and new_height == last_height and new_img_count == last_img_count:
                 no_new_content_count += 1
@@ -312,7 +321,7 @@ class EnhancedDivingPhotosDownloader:
                 self.driver.execute_script("window.gc && window.gc();")
         
         # 最终处理 - 确保完全加载
-        self.perform_final_upward_content_check()
+        self.perform_final_container_check(photo_container)
         
         # 获取最终统计
         final_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
@@ -321,44 +330,239 @@ class EnhancedDivingPhotosDownloader:
         # 禁用网络监控
         self.disable_network_monitoring()
     
-    def enable_network_monitoring(self):
-        """启用网络监控"""
+    def find_photo_container(self):
+        """找到图片容器区域"""
+        # 常见的图片容器选择器
+        container_selectors = [
+            # 微赞平台特定
+            ".vzan-photo-container",
+            ".vzan-gallery",
+            ".photo-gallery",
+            ".image-gallery",
+            # 通用选择器
+            "[class*='photo']",
+            "[class*='image']", 
+            "[class*='gallery']",
+            "[class*='grid']",
+            "[class*='list']",
+            "[id*='photo']",
+            "[id*='image']",
+            "[id*='gallery']",
+            # 可滚动的容器
+            "[style*='overflow']",
+            "[style*='scroll']"
+        ]
+        
+        for selector in container_selectors:
+            try:
+                containers = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                for container in containers:
+                    # 检查容器是否包含图片
+                    imgs_in_container = container.find_elements(By.TAG_NAME, "img")
+                    if len(imgs_in_container) >= 5:  # 至少包含5张图片才认为是图片容器
+                        self.log_message(f"找到图片容器: {selector}, 包含 {len(imgs_in_container)} 张图片")
+                        return container
+            except:
+                continue
+        
+        # 如果没找到特定容器，尝试找到包含最多图片的元素
         try:
-            # 启用网络域
-            self.driver.execute_cdp_cmd('Network.enable', {})
+            all_elements = self.driver.find_elements(By.CSS_SELECTOR, "div")
+            best_container = None
+            max_img_count = 0
+            
+            for element in all_elements:
+                try:
+                    imgs = element.find_elements(By.TAG_NAME, "img")
+                    if len(imgs) > max_img_count:
+                        max_img_count = len(imgs)
+                        best_container = element
+                except:
+                    continue
+            
+            if best_container and max_img_count >= 10:
+                self.log_message(f"找到最佳图片容器，包含 {max_img_count} 张图片")
+                return best_container
+        except:
+            pass
+        
+        return None
+    
+    def get_container_scroll_height(self, container):
+        """获取容器的滚动高度"""
+        try:
+            return self.driver.execute_script("return arguments[0].scrollHeight", container)
+        except:
+            return self.driver.execute_script("return document.body.scrollHeight")
+    
+    def get_container_scroll_position(self, container):
+        """获取容器的滚动位置"""
+        try:
+            return self.driver.execute_script("return arguments[0].scrollTop", container)
+        except:
+            return self.driver.execute_script("return window.pageYOffset")
+    
+    def is_container_at_bottom(self, container):
+        """检查容器是否滚动到底部"""
+        try:
+            scroll_top = self.driver.execute_script("return arguments[0].scrollTop", container)
+            scroll_height = self.driver.execute_script("return arguments[0].scrollHeight", container)
+            client_height = self.driver.execute_script("return arguments[0].clientHeight", container)
+            return scroll_top + client_height >= scroll_height - 10  # 允许10px误差
+        except:
+            return False
+    
+    def scroll_photo_container(self, container, attempt):
+        """滚动图片容器"""
+        strategies = [
+            lambda: self.scroll_container_down(container),
+            lambda: self.scroll_container_smooth(container),
+            lambda: self.scroll_container_step(container),
+            lambda: self.scroll_container_to_images(container)
+        ]
+        
+        # 根据尝试次数选择不同的滚动策略
+        strategy_index = attempt % len(strategies)
+        try:
+            strategies[strategy_index]()
+        except Exception as e:
+            self.log_message(f"滚动策略 {strategy_index} 失败: {e}")
+            # 使用最基本的滚动
+            try:
+                self.driver.execute_script("arguments[0].scrollTop += 300", container)
+            except:
+                # 最后的备用方案：滚动整个页面
+                self.driver.execute_script("window.scrollBy(0, 300)")
+    
+    def scroll_container_down(self, container):
+        """向下滚动容器"""
+        self.driver.execute_script("""
+            arguments[0].scrollTop = arguments[0].scrollHeight;
+        """, container)
+        time.sleep(2)
+    
+    def scroll_container_smooth(self, container):
+        """平滑滚动容器"""
+        self.driver.execute_script("""
+            arguments[0].scrollBy({
+                top: 500,
+                behavior: 'smooth'
+            });
+        """, container)
+        time.sleep(2)
+    
+    def scroll_container_step(self, container):
+        """分步滚动容器"""
+        current_scroll = self.get_container_scroll_position(container)
+        new_scroll = current_scroll + 400
+        self.driver.execute_script("arguments[0].scrollTop = arguments[1]", container, new_scroll)
+        time.sleep(1.5)
+    
+    def scroll_container_to_images(self, container):
+        """滚动到容器中的图片位置"""
+        try:
+            # 找到容器中的图片
+            images = container.find_elements(By.TAG_NAME, "img")
+            if images:
+                # 滚动到最后几张图片的位置
+                last_images = images[-min(5, len(images)):]
+                for img in last_images:
+                    try:
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", img)
+                        time.sleep(1)
+                    except:
+                        continue
+        except:
+            # 如果失败，使用基本滚动
+            self.scroll_container_step(container)
+    
+    def perform_final_container_check(self, container):
+        """执行最终的容器检查"""
+        self.log_message("执行最终容器内容检查...")
+        
+        try:
+            # 滚动到容器顶部
+            self.driver.execute_script("arguments[0].scrollTop = 0", container)
+            time.sleep(2)
+            
+            # 滚动到容器底部
+            self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", container)
+            time.sleep(3)
+            
+            # 分步滚动确保所有内容加载
+            scroll_height = self.get_container_scroll_height(container)
+            steps = max(5, int(scroll_height / 500))
+            
+            for i in range(steps):
+                scroll_position = (i + 1) * (scroll_height / steps)
+                self.driver.execute_script("arguments[0].scrollTop = arguments[1]", container, scroll_position)
+                time.sleep(2)
+                
+                # 尝试点击加载更多按钮
+                self.click_all_load_more_buttons()
+                time.sleep(1)
+        except Exception as e:
+            self.log_message(f"最终容器检查出错: {e}")
+    
+    def scroll_and_load_all_content_fallback(self):
+        """备用的整页滚动方法"""
+        self.log_message("使用备用的整页滚动方法...")
+        
+        last_img_count = 0
+        scroll_attempts = 0
+        max_attempts = 100
+        
+        while scroll_attempts < max_attempts:
+            current_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
+            self.log_message(f"整页滚动 {scroll_attempts + 1}/{max_attempts}, 图片数量: {current_img_count}")
+            
+            # 滚动到底部
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3)
+            
+            # 点击加载更多按钮
+            self.click_all_load_more_buttons()
+            time.sleep(2)
+            
+            new_img_count = len(self.driver.find_elements(By.TAG_NAME, "img"))
+            
+            if new_img_count == last_img_count:
+                break
+            
+            last_img_count = new_img_count
+            scroll_attempts += 1
+    
+    def enable_network_monitoring(self):
+        """启用网络监控 - 简化版"""
+        try:
+            # 简化的网络监控，不依赖性能日志
             self.pending_requests = set()
-            self.log_message("网络监控已启用")
+            self.network_monitoring_enabled = True
+            self.log_message("网络监控已启用（简化版）")
         except Exception as e:
             self.log_message(f"无法启用网络监控: {e}")
             self.pending_requests = None
+            self.network_monitoring_enabled = False
     
     def disable_network_monitoring(self):
-        """禁用网络监控"""
+        """禁用网络监控 - 简化版"""
         try:
-            if hasattr(self, 'pending_requests'):
-                self.driver.execute_cdp_cmd('Network.disable', {})
+            if hasattr(self, 'network_monitoring_enabled'):
+                self.network_monitoring_enabled = False
                 self.log_message("网络监控已禁用")
         except Exception as e:
             self.log_message(f"禁用网络监控时出错: {e}")
     
     def has_pending_network_requests(self):
-        """检查是否有待处理的网络请求"""
-        if not hasattr(self, 'pending_requests') or self.pending_requests is None:
+        """检查是否有待处理的网络请求 - 简化版"""
+        if not hasattr(self, 'network_monitoring_enabled') or not self.network_monitoring_enabled:
             return False
         
         try:
-            # 获取网络活动
-            logs = self.driver.get_log('performance')
-            active_requests = 0
-            
-            for log in logs:
-                message = json.loads(log['message'])
-                if message.get('message', {}).get('method') == 'Network.requestWillBeSent':
-                    active_requests += 1
-                elif message.get('message', {}).get('method') in ['Network.responseReceived', 'Network.loadingFailed']:
-                    active_requests = max(0, active_requests - 1)
-            
-            return active_requests > 0
+            # 简化的网络活动检测
+            # 通过检查页面加载状态来判断
+            ready_state = self.driver.execute_script("return document.readyState")
+            return ready_state != "complete"
         except:
             return False
     
