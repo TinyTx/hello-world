@@ -26,13 +26,14 @@ fi
 
 echo "选择要运行的脚本："
 echo "1. 改进的页面分析器（推荐先运行此选项）"
-echo "2. V2版下载器（专门针对弹窗和保存流程优化）"
-echo "3. 增强版下载器（包含登录功能）"
-echo "4. 原始版下载器"
-echo "5. 简化版下载器（无需浏览器）"
+echo "2. V3版下载器（直接下载原图，推荐）"
+echo "3. V2版下载器（弹窗流程处理）"
+echo "4. 增强版下载器（包含登录功能）"
+echo "5. 原始版下载器"
+echo "6. 简化版下载器（无需浏览器）"
 echo ""
 
-read -p "请选择 (1-5): " choice
+read -p "请选择 (1-6): " choice
 
 case $choice in
     1)
@@ -41,21 +42,26 @@ case $choice in
         python3 improved_page_analyzer.py
         ;;
     2)
-        echo "运行V2版下载器（推荐）..."
+        echo "运行V3版下载器（推荐）..."
+        chmod +x diving_photos_downloader_v3.py
+        python3 diving_photos_downloader_v3.py
+        ;;
+    3)
+        echo "运行V2版下载器..."
         chmod +x diving_photos_downloader_v2.py
         python3 diving_photos_downloader_v2.py
         ;;
-    3)
+    4)
         echo "运行增强版下载器..."
         chmod +x diving_photos_downloader_enhanced.py
         python3 diving_photos_downloader_enhanced.py
         ;;
-    4)
+    5)
         echo "运行原始版下载器..."
         chmod +x diving_photos_downloader.py
         python3 diving_photos_downloader.py
         ;;
-    5)
+    6)
         echo "运行简化版下载器..."
         chmod +x diving_photos_downloader_simple.py
         python3 diving_photos_downloader_simple.py
